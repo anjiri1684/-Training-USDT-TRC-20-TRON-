@@ -16,6 +16,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/wallet", walletRoutes);
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.get("/", (_req, res) => res.json({ ok: true, service: "classchain-api" }));
 
 const PORT = process.env.PORT || 4000;
 
