@@ -19,7 +19,7 @@ pragma solidity ^0.8.24;
  *         or any other third-party wallet or price provider.
  */
 contract TrainingUSDT {
-    string public constant name = "Training USDT";
+    string public constant name = "TUSDT";
     string public constant symbol = "TUSDT";
     uint8 public constant decimals = 6;
 
