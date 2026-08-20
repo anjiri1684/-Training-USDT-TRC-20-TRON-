@@ -17,6 +17,7 @@
     "dotenv": "^17.4.2",
     "ethers": "^6.17.0",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.6.2",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.23.0",
     "tronweb": "^6.5.0"

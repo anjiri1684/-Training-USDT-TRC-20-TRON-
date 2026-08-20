@@ -6,7 +6,7 @@ const {
   generateTronWallet,
   encryptSecret,
 } = require("../crypto-utils");
-const { addMemberOnBothChains, mintOnChain } = require("../chains");
+const { addMemberOnBothChains, removeMemberOnBothChains, mintOnChain } = require("../chains");
 
 const router = express.Router();
 router.use(requireAuth, requireTeacher);
@@ -89,6 +89,61 @@ router.post("/distribute", async (req, res) => {
     console.error("mintOnChain failed:", err.message);
     res.status(502).json({ error: "Mint failed on-chain. Check the admin wallet has enough gas." });
   }
+});
+
+// Reset a student's password (e.g. they forgot it). Teacher sets a new one directly.
+router.post("/students/:username/reset-password", async (req, res) => {
+  const { username } = req.params;
+  const { password } = req.body || {};
+  if (!password || password.length < 4) {
+    return res.status(400).json({ error: "New password must be at least 4 characters." });
+  }
+  const { rows } = await pool.query(
+    "SELECT id FROM users WHERE username = $1 AND role = 'student'",
+    [username]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "No such student." });
+
+  const passwordHash = await hashPassword(password);
+  await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [passwordHash, rows[0].id]);
+  res.json({ ok: true });
+});
+
+// Remove a student: revokes their on-chain membership (so their wallet can
+// no longer send/receive) and deletes the account. Irreversible.
+router.delete("/students/:username", async (req, res) => {
+  const { username } = req.params;
+  const { rows } = await pool.query(
+    "SELECT * FROM users WHERE username = $1 AND role = 'student'",
+    [username]
+  );
+  const student = rows[0];
+  if (!student) return res.status(404).json({ error: "No such student." });
+
+  try {
+    await removeMemberOnBothChains(student.eth_address, student.tron_address);
+  } catch (err) {
+    console.error("removeMemberOnBothChains failed:", err.message);
+    return res.status(502).json({ error: "Could not revoke on-chain membership. Try again." });
+  }
+
+  await pool.query("DELETE FROM users WHERE id = $1", [student.id]);
+  res.json({ ok: true });
+});
+
+// Class-wide transaction history — every mint and transfer across all
+// students, for the teacher to audit.
+router.get("/history", async (_req, res) => {
+  const { rows } = await pool.query(
+    `SELECT t.id, t.chain, t.amount, t.tx_hash, t.kind, t.created_at,
+            fu.username AS from_username, tu.username AS to_username
+     FROM transfers t
+     LEFT JOIN users fu ON fu.id = t.from_user_id
+     LEFT JOIN users tu ON tu.id = t.to_user_id
+     ORDER BY t.created_at DESC
+     LIMIT 200`
+  );
+  res.json(rows);
 });
 
 module.exports = router;

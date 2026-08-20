@@ -13,7 +13,7 @@ module.exports = {
       // "Available Accounts" / "Private Keys" and paste Account #0's key
       // here before deploying.
       privateKey:
-        "b3220a4d66b00c1fae8cc27fd4bf8c002bf8fbf7c1eb92f8e212628b75ca6693",
+        "1cf231f10c8dd1aaa7c2cd2a0e90c99bfcf51947c8138b0fab00f5de520a5b20",
       userFeePercentage: 0,
       feeLimit: 1_000_000_000,
       fullHost: "http://127.0.0.1:9090",

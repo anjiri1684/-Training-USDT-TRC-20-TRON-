@@ -35,12 +35,37 @@ function tronFromUnits(raw) {
 }
 
 
+// Custodial wallets start with zero native currency, which means they
+// can't pay gas for their own transactions (minting is fine — the admin
+// wallet pays for that — but a student's own "Send" needs their own
+// wallet to cover gas). Top up a small amount from the admin wallet so
+// every new account can actually transact.
+const ETH_GAS_TOPUP = ethers.parseEther("0.005");
+const TRX_GAS_TOPUP = 20_000_000; // 20 TRX, in sun
+
+async function fundGasOnBothChains(ethAddress, tronAddress) {
+  const ethTx = await ethAdminWallet.sendTransaction({ to: ethAddress, value: ETH_GAS_TOPUP });
+  await ethTx.wait();
+
+  await tronAdmin.trx.sendTransaction(tronAddress, TRX_GAS_TOPUP);
+}
+
 async function addMemberOnBothChains(ethAddress, tronAddress) {
   const ethTx = await ethContract.addMember(ethAddress);
   await ethTx.wait();
 
   const tronC = await tronContract(tronAdmin);
   await tronC.addMember(tronAddress).send();
+
+  await fundGasOnBothChains(ethAddress, tronAddress);
+}
+
+async function removeMemberOnBothChains(ethAddress, tronAddress) {
+  const ethTx = await ethContract.removeMember(ethAddress);
+  await ethTx.wait();
+
+  const tronC = await tronContract(tronAdmin);
+  await tronC.removeMember(tronAddress).send();
 }
 
 async function mintOnChain(chain, toAddress, amount) {
@@ -79,6 +104,8 @@ async function transferOnChain(chain, fromPrivateKey, toAddress, amount) {
 
 module.exports = {
   addMemberOnBothChains,
+  removeMemberOnBothChains,
+  fundGasOnBothChains,
   mintOnChain,
   transferOnChain,
   balances,

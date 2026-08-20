@@ -58,4 +58,19 @@ router.post("/transfer", async (req, res) => {
   }
 });
 
+router.get("/history", async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT t.id, t.chain, t.amount, t.tx_hash, t.kind, t.created_at,
+            fu.username AS from_username, tu.username AS to_username
+     FROM transfers t
+     LEFT JOIN users fu ON fu.id = t.from_user_id
+     LEFT JOIN users tu ON tu.id = t.to_user_id
+     WHERE t.from_user_id = $1 OR t.to_user_id = $1
+     ORDER BY t.created_at DESC
+     LIMIT 100`,
+    [req.user.id]
+  );
+  res.json(rows);
+});
+
 module.exports = router;
