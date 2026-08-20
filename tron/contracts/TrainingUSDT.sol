@@ -20,7 +20,7 @@ pragma solidity ^0.8.24;
  */
 contract TrainingUSDT {
     string public constant name = "Training USDT";
-    string public constant symbol = "USDT";
+    string public constant symbol = "TUSDT";
     uint8 public constant decimals = 6;
 
     uint256 public totalSupply;
