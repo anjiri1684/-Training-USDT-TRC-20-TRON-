@@ -11,9 +11,7 @@ const {
 
 const router = express.Router();
 
-// Optional shared-secret gate for the send endpoints. When TRAINING_API_KEY
-// is set, clients must send it as `x-api-key`; when unset (local training
-// use) the endpoints stay open but every input is still strictly validated.
+
 function optionalApiKey(req, res, next) {
   const expected = process.env.TRAINING_API_KEY;
   if (!expected) return next();
@@ -77,7 +75,9 @@ async function handleSend(req, res, sendFn) {
   }
 }
 
-router.post("/send-trx", optionalApiKey, (req, res) => handleSend(req, res, sendTrx));
-router.post("/send-trc10", optionalApiKey, (req, res) => handleSend(req, res, sendTrc10));
+// router.post("/send-trx", optionalApiKey, (req, res) => handleSend(req, res, sendTrx));
+// router.post("/send-trc10", optionalApiKey, (req, res) => handleSend(req, res, sendTrc10));
+router.post("/send-trx", (req, res) => handleSend(req, res, sendTrx));
+router.post("/send-trc10", (req, res) => handleSend(req, res, sendTrc10));
 
 module.exports = router;
