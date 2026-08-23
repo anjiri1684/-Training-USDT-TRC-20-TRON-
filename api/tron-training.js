@@ -152,11 +152,20 @@ async function treasuryStatus() {
   return { ...token, treasury: { address, ...balances } };
 }
 
-async function waitForConfirmation(tronWeb, txid, attempts = 60, delayMs = 2000) {
+async function waitForConfirmation(tronWeb, txid, attempts = 30, delayMs = 1000) {
   for (let i = 0; i < attempts; i++) {
     try {
       const info = await tronWeb.trx.getTransactionInfo(txid);
-      if (info && info.id) return info;
+      if (info && (info.id || info.blockNumber)) return info;
+
+      const tx = await tronWeb.trx.getTransaction(txid);
+      if (tx && Array.isArray(tx.ret) && tx.ret.length > 0 && tx.ret[0].contractRet) {
+        return {
+          id: txid,
+          receipt: { result: tx.ret[0].contractRet },
+          resMessage: tx.ret[0].resMessage || null,
+        };
+      }
     } catch {
       // not confirmed yet; keep polling
     }
