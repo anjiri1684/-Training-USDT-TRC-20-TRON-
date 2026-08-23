@@ -1,11 +1,3 @@
-/**
- * One-time script to create the first teacher account. There is no public
- * signup route on purpose — every account after this one is created by a
- * teacher through the admin API.
- *
- * Usage: npm run seed
- * Reads TEACHER_USERNAME / TEACHER_PASSWORD from .env.
- */
 require("dotenv").config();
 const { pool, initSchema } = require("./db");
 const { hashPassword } = require("./auth");

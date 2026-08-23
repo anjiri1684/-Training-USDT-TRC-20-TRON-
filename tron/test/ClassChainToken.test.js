@@ -1,8 +1,6 @@
 const ClassChainToken = artifacts.require("ClassChainToken");
 
-// TRON contract calls don't throw a JS exception on revert the way ethers
-// does — the transaction still gets accepted and mined, it just executes
-// with result "REVERT". We have to check the transaction receipt directly.
+
 async function expectRevert(txIdPromise) {
   const txId = await txIdPromise;
   let info;

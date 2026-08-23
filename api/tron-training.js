@@ -1,12 +1,4 @@
-// TRON Nile training-treasury wallet: native TRX + TRC-10 token transfers.
-//
-// The treasury private key lives only in backend environment/secrets and
-// never leaves this process. The chain is the source of truth for every
-// balance; nothing here is simulated or cached as authoritative.
-//
-// Unit rules (BigInt only, no float math):
-//   1 TRX  = 1,000,000 SUN
-//   1 TUSDT = 1,000,000 base units  (TRC-10 token 1007344, precision 6)
+
 const { TronWeb } = require("tronweb");
 
 const NILE_HOST = (process.env.TRON_NILE_HOST || "https://nile.trongrid.io").replace(/\/+$/, "");
@@ -74,6 +66,26 @@ function validateAmount(amountStr, decimals) {
   if (units <= 0n) throw new Error("Amount must be greater than zero.");
   if (units > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Amount is too large.");
   return units;
+}
+
+// Optional TRX top-up bundled with every TUSDT send (TRX_TOPUP_PER_SEND,
+// in human TRX units, default off). The recipient gets native TRX so their
+// wallet shows a TRX balance and can pay future transaction fees.
+const TRX_TOPUP_MAX_SUN = 1_000_000_000_000n; // 1,000,000 TRX safety cap
+
+function trxTopupSun() {
+  const raw = process.env.TRX_TOPUP_PER_SEND;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return 0n;
+  const sun = validateAmount(raw, TRX_DECIMALS);
+  if (sun > TRX_TOPUP_MAX_SUN) {
+    throw new Error("TRX_TOPUP_PER_SEND is unreasonably large (max 1,000,000 TRX).");
+  }
+  return sun;
+}
+
+function trxTopupInfo() {
+  const sun = trxTopupSun();
+  return { trx: fromBaseUnits(sun, TRX_DECIMALS), sun: sun.toString() };
 }
 
 async function getTokenInfo() {
@@ -240,6 +252,29 @@ async function sendTrc10(to, amount) {
   if (BigInt(after.tusdtBase) >= held) {
     throw new Error(`Transaction ${txid} was confirmed, but the sender balance did not decrease as expected.`);
   }
+
+  // Optional native TRX top-up for the recipient (separate transaction:
+  // Nile rejects multi-contract transactions, so the TUSDT transfer and the
+  // TRX top-up are two sequential transactions in this one request).
+  let topupTxid = null;
+  let topupTrx = null;
+  const topupSun = trxTopupSun();
+  if (topupSun > 0n) {
+    const trxBalanceSun = BigInt(await tronWeb.trx.getBalance(from));
+    if (topupSun > trxBalanceSun) {
+      throw new Error(
+        `TUSDT sent, but the TRX top-up of ${fromBaseUnits(topupSun, TRX_DECIMALS)} TRX failed: insufficient TRX (available ${fromBaseUnits(trxBalanceSun, TRX_DECIMALS)} TRX).`
+      );
+    }
+    const topupTx = await tronWeb.transactionBuilder.sendTrx(to, Number(topupSun), from);
+    topupTxid = await broadcastAndConfirm(tronWeb, topupTx, "TRX top-up");
+    const afterSun = BigInt(await tronWeb.trx.getBalance(from));
+    if (afterSun >= trxBalanceSun) {
+      throw new Error(`TRX top-up ${topupTxid} was confirmed, but the sender balance did not decrease as expected.`);
+    }
+    topupTrx = padHuman(fromBaseUnits(topupSun, TRX_DECIMALS), TRX_DECIMALS);
+  }
+
   const recipient = await getAccountBalances(to);
   return {
     txid,
@@ -249,6 +284,8 @@ async function sendTrc10(to, amount) {
     tokenId: TOKEN_ID,
     amount: padHuman(fromBaseUnits(base, precision), precision),
     baseAmount: base.toString(),
+    topupTxid,
+    topupTrx,
     from,
     to,
     senderBalance: after,
@@ -274,6 +311,7 @@ module.exports = {
   getTokenInfo,
   sendTrx,
   sendTrc10,
+  trxTopupInfo,
   isAddress,
   toBaseUnits,
   fromBaseUnits,
