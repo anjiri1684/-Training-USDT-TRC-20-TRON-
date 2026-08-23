@@ -215,22 +215,25 @@ async function sendTrc10(to, amount) {
   if (from.toLowerCase() === to.toLowerCase()) {
     throw new Error("Sender and recipient must be different addresses.");
   }
-  // Training semantics (per product decision): "Send TUSDT" delivers the
-  // entered amount as NATIVE TRX to the recipient — 1 TUSDT entered =
-  // 1 TRX = 1,000,000 SUN — so the recipient's wallet visibly receives TRX.
-  // The TRC-10 asset itself is not transferred, and the recipient's TUSDT
-  // balance is not changed.
-  const sun = validateAmount(amount, TRX_DECIMALS);
-  const balanceSun = BigInt(await tronWeb.trx.getBalance(from));
-  if (sun > balanceSun) {
+  // Real TRC-10 transfer: the treasury's TUSDT balance is spent and the
+  // recipient receives the token on-chain (visible in TronLink/Trust Wallet).
+  const token = await getTokenInfo();
+  const precision = token.precision;
+  const base = validateAmount(amount, precision);
+  const account = await tronWeb.trx.getAccount(from);
+  const assets = Array.isArray(account.assetV2) ? account.assetV2 : [];
+  const entry = assets.find((a) => String(a.key) === TOKEN_ID);
+  const held = BigInt(entry ? entry.value : 0);
+  if (base > held) {
     throw new Error(
-      `Not enough treasury TRX for a TUSDT send (TUSDT sends are delivered as native TRX, 1:1). Available: ${fromBaseUnits(balanceSun, TRX_DECIMALS)} TRX. Refill the treasury TRX balance (${from}) to send more.`
+      `Not enough TUSDT in the treasury for this send. Available: ${fromBaseUnits(held, precision)} TUSDT (treasury ${from}).`
     );
   }
-  const unsignedTx = await tronWeb.transactionBuilder.sendTrx(to, Number(sun), from);
-  const txid = await broadcastAndConfirm(tronWeb, unsignedTx, "TRX");
-  const afterSun = BigInt(await tronWeb.trx.getBalance(from));
-  if (afterSun >= balanceSun) {
+  // TRC-10 uses a TransferAssetContract with the amount in base units.
+  const unsignedTx = await tronWeb.transactionBuilder.sendAsset(to, Number(base), TOKEN_ID, from);
+  const txid = await broadcastAndConfirm(tronWeb, unsignedTx, "TRC-10");
+  const after = await getAccountBalances(from);
+  if (BigInt(after.tusdtBase) >= held) {
     throw new Error(`Transaction ${txid} was confirmed, but the sender balance did not decrease as expected.`);
   }
   const recipient = await getAccountBalances(to);
@@ -238,13 +241,13 @@ async function sendTrc10(to, amount) {
     txid,
     status: "confirmed",
     network: "TRON Nile",
-    requestedAsset: "TUSDT",
-    asset: "TRX",
-    amount: padHuman(fromBaseUnits(sun, TRX_DECIMALS), TRX_DECIMALS),
-    baseAmount: sun.toString(),
+    asset: "TUSDT",
+    tokenId: TOKEN_ID,
+    amount: padHuman(fromBaseUnits(base, precision), precision),
+    baseAmount: base.toString(),
     from,
     to,
-    senderBalance: { trx: fromBaseUnits(afterSun, TRX_DECIMALS) },
+    senderBalance: after,
     recipientBalance: recipient,
   };
 }
