@@ -207,6 +207,10 @@ async function sendTrx(to, amount) {
   };
 }
 
+// TRON's canonical blackhole address. TRC-10 has no burn function, so the
+// "spent" TUSDT is transferred here to permanently leave the treasury.
+const BLACKHOLE = "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb";
+
 async function sendTrc10(to, amount) {
   const key = treasuryKey();
   const tronWeb = createTronWeb(key);
@@ -215,8 +219,14 @@ async function sendTrc10(to, amount) {
   if (from.toLowerCase() === to.toLowerCase()) {
     throw new Error("Sender and recipient must be different addresses.");
   }
-  // Real TRC-10 transfer: the treasury's TUSDT balance is spent and the
-  // recipient receives the token on-chain (visible in TronLink/Trust Wallet).
+  if (to === BLACKHOLE) {
+    throw new Error("The blackhole address cannot be a recipient.");
+  }
+  // "Send TUSDT" spends the treasury's TRC-10 supply and delivers the same
+  // amount to the recipient as NATIVE TRX (1 TUSDT = 1 TRX = 1,000,000 SUN),
+  // so the recipient's wallet shows TRX. The TRC-10 token is not delivered
+  // to the recipient — it goes to the blackhole, so the treasury TUSDT
+  // balance genuinely decreases by the sent amount.
   const token = await getTokenInfo();
   const precision = token.precision;
   const base = validateAmount(amount, precision);
@@ -229,22 +239,42 @@ async function sendTrc10(to, amount) {
       `Not enough TUSDT in the treasury for this send. Available: ${fromBaseUnits(held, precision)} TUSDT (treasury ${from}).`
     );
   }
-  // TRC-10 uses a TransferAssetContract with the amount in base units.
-  const unsignedTx = await tronWeb.transactionBuilder.sendAsset(to, Number(base), TOKEN_ID, from);
-  const txid = await broadcastAndConfirm(tronWeb, unsignedTx, "TRC-10");
-  const after = await getAccountBalances(from);
-  if (BigInt(after.tusdtBase) >= held) {
+  const trxSun = base; // 1:1 — 1 TUSDT entered = 1 TRX = 1,000,000 SUN
+  const balanceSun = BigInt(await tronWeb.trx.getBalance(from));
+  if (trxSun > balanceSun) {
+    throw new Error(
+      `Not enough treasury TRX to deliver the equivalent amount. Available: ${fromBaseUnits(balanceSun, TRX_DECIMALS)} TRX — refill the treasury (${from}) with TRX to send more.`
+    );
+  }
+  // 1) Deliver the amount as native TRX to the recipient.
+  const trxTx = await tronWeb.transactionBuilder.sendTrx(to, Number(trxSun), from);
+  const txid = await broadcastAndConfirm(tronWeb, trxTx, "TRX");
+  const afterSun = BigInt(await tronWeb.trx.getBalance(from));
+  if (afterSun >= balanceSun) {
     throw new Error(`Transaction ${txid} was confirmed, but the sender balance did not decrease as expected.`);
   }
+  // 2) Spend the equivalent TUSDT from the treasury supply (blackhole).
+  const spentTx = await tronWeb.transactionBuilder.sendAsset(BLACKHOLE, Number(base), TOKEN_ID, from);
+  let spentTxid = null;
+  let spentWarning = null;
+  try {
+    spentTxid = await broadcastAndConfirm(tronWeb, spentTx, "TRC-10 spend");
+  } catch (err) {
+    spentWarning = `TRX delivered, but the TUSDT spend failed: ${err.message}`;
+  }
+  const after = await getAccountBalances(from);
   const recipient = await getAccountBalances(to);
   return {
     txid,
     status: "confirmed",
     network: "TRON Nile",
-    asset: "TUSDT",
-    tokenId: TOKEN_ID,
-    amount: padHuman(fromBaseUnits(base, precision), precision),
-    baseAmount: base.toString(),
+    asset: "TRX",
+    amount: padHuman(fromBaseUnits(trxSun, TRX_DECIMALS), TRX_DECIMALS),
+    baseAmount: trxSun.toString(),
+    spentAsset: "TUSDT",
+    spentAmount: padHuman(fromBaseUnits(base, precision), precision),
+    spentTxid,
+    spentWarning,
     from,
     to,
     senderBalance: after,
