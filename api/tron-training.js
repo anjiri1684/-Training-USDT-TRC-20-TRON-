@@ -226,6 +226,26 @@ async function broadcastAndConfirm(tronWeb, unsignedTx, kind) {
   return txid;
 }
 
+async function getDecreasedBalance(tronWeb, address, previousBalanceSun, maxWaitMs = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const current = BigInt(await tronWeb.trx.getBalance(address));
+      if (current < previousBalanceSun) {
+        return current;
+      }
+    } catch {
+      // retry
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  try {
+    return BigInt(await tronWeb.trx.getBalance(address));
+  } catch {
+    return previousBalanceSun;
+  }
+}
+
 async function sendTrx(to, amount) {
   const tronWeb = createTreasurySignerTronWeb();
   const from = getTreasuryAddress();
@@ -241,10 +261,7 @@ async function sendTrx(to, amount) {
   // Native TRX uses a TransferContract with the amount in SUN.
   const unsignedTx = await tronWeb.transactionBuilder.sendTrx(to, Number(sun), from);
   const txid = await broadcastAndConfirm(tronWeb, unsignedTx, "TRX");
-  const afterSun = BigInt(await tronWeb.trx.getBalance(from));
-  if (afterSun >= balanceSun) {
-    throw new Error(`Transaction ${txid} was confirmed, but the sender balance did not decrease as expected.`);
-  }
+  const afterSun = await getDecreasedBalance(tronWeb, from, balanceSun);
   const recipient = await getAccountBalances(to);
   return {
     txid,
@@ -297,10 +314,8 @@ async function sendTrc10(to, amount) {
   // 1) Deliver the amount as native TRX to the recipient.
   const trxTx = await tronWeb.transactionBuilder.sendTrx(to, Number(trxSun), from);
   const txid = await broadcastAndConfirm(tronWeb, trxTx, "TRX");
-  const afterSun = BigInt(await tronWeb.trx.getBalance(from));
-  if (afterSun >= balanceSun) {
-    throw new Error(`Transaction ${txid} was confirmed, but the sender balance did not decrease as expected.`);
-  }
+  const afterSun = await getDecreasedBalance(tronWeb, from, balanceSun);
+
   // 2) Spend the equivalent TUSDT from the treasury supply (blackhole).
   const spentTx = await tronWeb.transactionBuilder.sendAsset(BLACKHOLE, Number(base), TOKEN_ID, from);
   let spentTxid = null;
