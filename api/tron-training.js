@@ -118,7 +118,7 @@ async function treasuryStatus() {
   return { ...token, treasury: { address, ...balances } };
 }
 
-async function waitForConfirmation(tronWeb, txid, attempts = 25, delayMs = 2000) {
+async function waitForConfirmation(tronWeb, txid, attempts = 60, delayMs = 2000) {
   for (let i = 0; i < attempts; i++) {
     try {
       const info = await tronWeb.trx.getTransactionInfo(txid);
