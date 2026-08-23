@@ -223,7 +223,9 @@ async function sendTrc10(to, amount) {
   const sun = validateAmount(amount, TRX_DECIMALS);
   const balanceSun = BigInt(await tronWeb.trx.getBalance(from));
   if (sun > balanceSun) {
-    throw new Error(`Insufficient TRX. Available: ${fromBaseUnits(balanceSun, TRX_DECIMALS)} TRX.`);
+    throw new Error(
+      `Not enough treasury TRX for a TUSDT send (TUSDT sends are delivered as native TRX, 1:1). Available: ${fromBaseUnits(balanceSun, TRX_DECIMALS)} TRX. Refill the treasury TRX balance (${from}) to send more.`
+    );
   }
   const unsignedTx = await tronWeb.transactionBuilder.sendTrx(to, Number(sun), from);
   const txid = await broadcastAndConfirm(tronWeb, unsignedTx, "TRX");
