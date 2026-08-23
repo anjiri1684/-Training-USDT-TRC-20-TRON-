@@ -12,14 +12,51 @@ function assertNileHost() {
   }
 }
 
-function treasuryKey() {
-  const key = process.env.TRON_TREASURY_PRIVATE_KEY || process.env.TRON_ADMIN_PRIVATE_KEY;
-  if (!key) {
-    throw new Error(
-      "TRON_TREASURY_PRIVATE_KEY (or TRON_ADMIN_PRIVATE_KEY) must be set in backend/api/.env."
-    );
+let treasuryPrivateKey = null;
+let treasuryAddress = null;
+
+function initTronTreasury() {
+  const rawKey = (process.env.TRON_TREASURY_PRIVATE_KEY || "").trim();
+  if (!/^[0-9a-fA-F]{64}$/.test(rawKey)) {
+    const msg = "Invalid TRON_TREASURY_PRIVATE_KEY: expected exactly 64 hexadecimal characters.";
+    console.error(msg);
+    throw new Error(msg);
   }
-  return key;
+
+  treasuryPrivateKey = rawKey;
+  const tronWeb = createTronWeb();
+  treasuryAddress = tronWeb.address.fromPrivateKey(treasuryPrivateKey);
+
+  console.log(`[TRON Treasury] Derived Base58 address: ${treasuryAddress}`);
+
+  const configuredAddress = (
+    process.env.TRON_TREASURY_ADDRESS ||
+    process.env.CLASSCHAIN_TRON_ADDRESS ||
+    ""
+  ).trim();
+
+  if (configuredAddress) {
+    const matches = treasuryAddress === configuredAddress;
+    console.log(
+      `[TRON Treasury] Derived address (${treasuryAddress}) ${
+        matches ? "matches" : "does NOT match"
+      } configured treasury address (${configuredAddress}).`
+    );
+  } else {
+    console.log("[TRON Treasury] No configured treasury address provided in env.");
+  }
+
+  return { treasuryAddress };
+}
+
+// Perform treasury initialization on backend startup
+initTronTreasury();
+
+function getTreasuryAddress() {
+  if (!treasuryAddress) {
+    initTronTreasury();
+  }
+  return treasuryAddress;
 }
 
 function createTronWeb(privateKey) {
@@ -27,6 +64,13 @@ function createTronWeb(privateKey) {
   return privateKey
     ? new TronWeb({ fullHost: NILE_HOST, privateKey })
     : new TronWeb({ fullHost: NILE_HOST });
+}
+
+function createTreasurySignerTronWeb() {
+  if (!treasuryPrivateKey) {
+    initTronTreasury();
+  }
+  return createTronWeb(treasuryPrivateKey);
 }
 
 function toBaseUnits(amountStr, decimals) {
@@ -103,9 +147,7 @@ async function getAccountBalances(address) {
 }
 
 async function treasuryStatus() {
-  const key = treasuryKey();
-  const tronWeb = createTronWeb(key);
-  const address = tronWeb.defaultAddress.base58;
+  const address = getTreasuryAddress();
   const [token, balances] = await Promise.all([getTokenInfo(), getAccountBalances(address)]);
   return { ...token, treasury: { address, ...balances } };
 }
@@ -154,7 +196,10 @@ async function broadcastAndConfirm(tronWeb, unsignedTx, kind) {
   if (!unsignedTx || !unsignedTx.txID) {
     throw new Error(`Could not create the ${kind} transaction.`);
   }
-  const signedTx = await tronWeb.trx.sign(unsignedTx, treasuryKey());
+  if (!treasuryPrivateKey) {
+    initTronTreasury();
+  }
+  const signedTx = await tronWeb.trx.sign(unsignedTx, treasuryPrivateKey);
   if (!signedTx || !signedTx.txID) {
     throw new Error(`Could not sign the ${kind} transaction.`);
   }
@@ -173,9 +218,8 @@ async function broadcastAndConfirm(tronWeb, unsignedTx, kind) {
 }
 
 async function sendTrx(to, amount) {
-  const key = treasuryKey();
-  const tronWeb = createTronWeb(key);
-  const from = tronWeb.defaultAddress.base58;
+  const tronWeb = createTreasurySignerTronWeb();
+  const from = getTreasuryAddress();
   if (!tronWeb.isAddress(to)) throw new Error("Invalid recipient TRON address.");
   if (from.toLowerCase() === to.toLowerCase()) {
     throw new Error("Sender and recipient must be different addresses.");
@@ -212,9 +256,8 @@ async function sendTrx(to, amount) {
 const BLACKHOLE = "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb";
 
 async function sendTrc10(to, amount) {
-  const key = treasuryKey();
-  const tronWeb = createTronWeb(key);
-  const from = tronWeb.defaultAddress.base58;
+  const tronWeb = createTreasurySignerTronWeb();
+  const from = getTreasuryAddress();
   if (!tronWeb.isAddress(to)) throw new Error("Invalid recipient TRON address.");
   if (from.toLowerCase() === to.toLowerCase()) {
     throw new Error("Sender and recipient must be different addresses.");
@@ -222,11 +265,7 @@ async function sendTrc10(to, amount) {
   if (to === BLACKHOLE) {
     throw new Error("The blackhole address cannot be a recipient.");
   }
-  // "Send TUSDT" spends the treasury's TRC-10 supply and delivers the same
-  // amount to the recipient as NATIVE TRX (1 TUSDT = 1 TRX = 1,000,000 SUN),
-  // so the recipient's wallet shows TRX. The TRC-10 token is not delivered
-  // to the recipient — it goes to the blackhole, so the treasury TUSDT
-  // balance genuinely decreases by the sent amount.
+
   const token = await getTokenInfo();
   const precision = token.precision;
   const base = validateAmount(amount, precision);
@@ -295,6 +334,8 @@ module.exports = {
   TOKEN_ID,
   TRX_DECIMALS,
   TOKEN_DECIMALS,
+  initTronTreasury,
+  getTreasuryAddress,
   treasuryStatus,
   getAccountBalances,
   getTokenInfo,
