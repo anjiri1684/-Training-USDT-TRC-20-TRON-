@@ -75,9 +75,7 @@ async function handleSend(req, res, sendFn) {
   }
 }
 
-// router.post("/send-trx", optionalApiKey, (req, res) => handleSend(req, res, sendTrx));
-// router.post("/send-trc10", optionalApiKey, (req, res) => handleSend(req, res, sendTrc10));
-router.post("/send-trx", (req, res) => handleSend(req, res, sendTrx));
-router.post("/send-trc10", (req, res) => handleSend(req, res, sendTrc10));
+router.post("/send-trx", optionalApiKey, (req, res) => handleSend(req, res, sendTrx));
+router.post("/send-trc10", optionalApiKey, (req, res) => handleSend(req, res, sendTrc10));
 
 module.exports = router;
