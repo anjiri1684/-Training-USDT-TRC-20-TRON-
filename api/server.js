@@ -7,6 +7,7 @@ const { initSchema } = require("./db");
 const authRoutes = require("./routes/auth");
 const adminRoutes = require("./routes/admin");
 const walletRoutes = require("./routes/wallet");
+const tronTrainingRoutes = require("./routes/tron");
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use("/api/auth/login", loginLimiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/wallet", walletRoutes);
+app.use("/api/tron", tronTrainingRoutes);
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.get("/", (_req, res) => res.json({ ok: true, service: "classchain-api" }));
