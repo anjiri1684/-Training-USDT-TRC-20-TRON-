@@ -6,7 +6,6 @@ const {
   getAccountBalances,
   sendTrx,
   sendTrc10,
-  trxTopupInfo,
   isAddress,
 } = require("../tron-training");
 
@@ -40,7 +39,6 @@ router.get("/status", async (_req, res) => {
         totalSupply: status.totalSupply,
         owner: status.owner,
       },
-      topup: trxTopupInfo(),
       treasury: status.treasury,
     });
   } catch (err) {

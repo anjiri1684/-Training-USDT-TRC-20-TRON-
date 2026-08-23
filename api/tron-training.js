@@ -68,26 +68,6 @@ function validateAmount(amountStr, decimals) {
   return units;
 }
 
-// Optional TRX top-up bundled with every TUSDT send (TRX_TOPUP_PER_SEND,
-// in human TRX units, default off). The recipient gets native TRX so their
-// wallet shows a TRX balance and can pay future transaction fees.
-const TRX_TOPUP_MAX_SUN = 1_000_000_000_000n; // 1,000,000 TRX safety cap
-
-function trxTopupSun() {
-  const raw = process.env.TRX_TOPUP_PER_SEND;
-  if (raw === undefined || raw === null || String(raw).trim() === "") return 0n;
-  const sun = validateAmount(raw, TRX_DECIMALS);
-  if (sun > TRX_TOPUP_MAX_SUN) {
-    throw new Error("TRX_TOPUP_PER_SEND is unreasonably large (max 1,000,000 TRX).");
-  }
-  return sun;
-}
-
-function trxTopupInfo() {
-  const sun = trxTopupSun();
-  return { trx: fromBaseUnits(sun, TRX_DECIMALS), sun: sun.toString() };
-}
-
 async function getTokenInfo() {
   const res = await fetch(`${NILE_HOST}/v1/assets/${TOKEN_ID}`);
   if (!res.ok) throw new Error(`Could not read token ${TOKEN_ID} metadata (HTTP ${res.status}).`);
@@ -235,60 +215,34 @@ async function sendTrc10(to, amount) {
   if (from.toLowerCase() === to.toLowerCase()) {
     throw new Error("Sender and recipient must be different addresses.");
   }
-  const token = await getTokenInfo();
-  const precision = token.precision;
-  const base = validateAmount(amount, precision);
-  const account = await tronWeb.trx.getAccount(from);
-  const assets = Array.isArray(account.assetV2) ? account.assetV2 : [];
-  const entry = assets.find((a) => String(a.key) === TOKEN_ID);
-  const held = BigInt(entry ? entry.value : 0);
-  if (base > held) {
-    throw new Error(`Insufficient TUSDT. Available: ${fromBaseUnits(held, precision)} TUSDT.`);
+  // Training semantics (per product decision): "Send TUSDT" delivers the
+  // entered amount as NATIVE TRX to the recipient — 1 TUSDT entered =
+  // 1 TRX = 1,000,000 SUN — so the recipient's wallet visibly receives TRX.
+  // The TRC-10 asset itself is not transferred, and the recipient's TUSDT
+  // balance is not changed.
+  const sun = validateAmount(amount, TRX_DECIMALS);
+  const balanceSun = BigInt(await tronWeb.trx.getBalance(from));
+  if (sun > balanceSun) {
+    throw new Error(`Insufficient TRX. Available: ${fromBaseUnits(balanceSun, TRX_DECIMALS)} TRX.`);
   }
-  // TRC-10 uses a TransferAssetContract with the amount in base units.
-  const unsignedTx = await tronWeb.transactionBuilder.sendAsset(to, Number(base), TOKEN_ID, from);
-  const txid = await broadcastAndConfirm(tronWeb, unsignedTx, "TRC-10");
-  const after = await getAccountBalances(from);
-  if (BigInt(after.tusdtBase) >= held) {
+  const unsignedTx = await tronWeb.transactionBuilder.sendTrx(to, Number(sun), from);
+  const txid = await broadcastAndConfirm(tronWeb, unsignedTx, "TRX");
+  const afterSun = BigInt(await tronWeb.trx.getBalance(from));
+  if (afterSun >= balanceSun) {
     throw new Error(`Transaction ${txid} was confirmed, but the sender balance did not decrease as expected.`);
   }
-
-  // Optional native TRX top-up for the recipient (separate transaction:
-  // Nile rejects multi-contract transactions, so the TUSDT transfer and the
-  // TRX top-up are two sequential transactions in this one request).
-  let topupTxid = null;
-  let topupTrx = null;
-  const topupSun = trxTopupSun();
-  if (topupSun > 0n) {
-    const trxBalanceSun = BigInt(await tronWeb.trx.getBalance(from));
-    if (topupSun > trxBalanceSun) {
-      throw new Error(
-        `TUSDT sent, but the TRX top-up of ${fromBaseUnits(topupSun, TRX_DECIMALS)} TRX failed: insufficient TRX (available ${fromBaseUnits(trxBalanceSun, TRX_DECIMALS)} TRX).`
-      );
-    }
-    const topupTx = await tronWeb.transactionBuilder.sendTrx(to, Number(topupSun), from);
-    topupTxid = await broadcastAndConfirm(tronWeb, topupTx, "TRX top-up");
-    const afterSun = BigInt(await tronWeb.trx.getBalance(from));
-    if (afterSun >= trxBalanceSun) {
-      throw new Error(`TRX top-up ${topupTxid} was confirmed, but the sender balance did not decrease as expected.`);
-    }
-    topupTrx = padHuman(fromBaseUnits(topupSun, TRX_DECIMALS), TRX_DECIMALS);
-  }
-
   const recipient = await getAccountBalances(to);
   return {
     txid,
     status: "confirmed",
     network: "TRON Nile",
-    asset: "TUSDT",
-    tokenId: TOKEN_ID,
-    amount: padHuman(fromBaseUnits(base, precision), precision),
-    baseAmount: base.toString(),
-    topupTxid,
-    topupTrx,
+    requestedAsset: "TUSDT",
+    asset: "TRX",
+    amount: padHuman(fromBaseUnits(sun, TRX_DECIMALS), TRX_DECIMALS),
+    baseAmount: sun.toString(),
     from,
     to,
-    senderBalance: after,
+    senderBalance: { trx: fromBaseUnits(afterSun, TRX_DECIMALS) },
     recipientBalance: recipient,
   };
 }
@@ -311,7 +265,6 @@ module.exports = {
   getTokenInfo,
   sendTrx,
   sendTrc10,
-  trxTopupInfo,
   isAddress,
   toBaseUnits,
   fromBaseUnits,
